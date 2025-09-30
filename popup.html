@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghost Key - Biometric Authentication</title>
+    <link rel="stylesheet" href="ui/popup.css">
+</head>
+<body>
+    <div class="ghost-key-popup">
+        <!-- Header -->
+        <div class="popup-header">
+            <div class="logo">
+                <span class="icon">🔐</span>
+                <span class="title">Ghost Key</span>
+            </div>
+            <div class="status" id="extension-status">
+                <span class="status-indicator" id="status-indicator"></span>
+                <span class="status-text" id="status-text">Ready</span>
+            </div>
+        </div>
+
+        <!-- Active Profile Display -->
+        <div class="active-profile" id="active-profile-section">
+            <div class="section-header">
+                <h3>Active Profile</h3>
+                <button class="btn-icon" id="refresh-profiles" title="Refresh">🔄</button>
+            </div>
+            <div class="profile-card" id="active-profile-card">
+                <div class="no-profile" id="no-profile-message">
+                    <span class="icon">👤</span>
+                    <p>No profile selected</p>
+                    <button class="btn btn-primary" id="create-first-profile">Create Profile</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Profile Management -->
+        <div class="profile-management">
+            <div class="section-header">
+                <h3>Profile Management</h3>
+                <button class="btn-icon" id="add-profile" title="Add Profile">➕</button>
+            </div>
+            
+            <div class="profile-list" id="profile-list">
+                <!-- Profiles will be dynamically loaded here -->
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+            <button class="btn btn-secondary" id="settings-btn">⚙️ Settings</button>
+            <button class="btn btn-secondary" id="help-btn">❓ Help</button>
+        </div>
+
+        <!-- Settings Panel (Initially Hidden) -->
+        <div class="settings-panel hidden" id="settings-panel">
+            <div class="section-header">
+                <h3>Settings</h3>
+                <button class="btn-icon" id="close-settings">✕</button>
+            </div>
+            
+            <div class="setting-group">
+                <label class="setting-item">
+                    <input type="checkbox" id="auto-activate" checked>
+                    <span>Auto-activate on password fields</span>
+                </label>
+                
+                <label class="setting-item">
+                    <input type="checkbox" id="clear-password" checked>
+                    <span>Auto-clear password after authentication</span>
+                </label>
+                
+                <label class="setting-item">
+                    <input type="checkbox" id="close-on-failure" checked>
+                    <span>Close website after failed authentication</span>
+                </label>
+                
+                <label class="setting-item">
+                    <input type="checkbox" id="voice-fallback" checked>
+                    <span>Enable voice authentication fallback</span>
+                </label>
+                
+                <label class="setting-item">
+                    <input type="checkbox" id="notifications" checked>
+                    <span>Show notifications</span>
+                </label>
+            </div>
+            
+            <div class="setting-group">
+                <h4>Security Threshold</h4>
+                <div class="threshold-setting">
+                    <label for="auth-threshold">Authentication Sensitivity:</label>
+                    <input type="range" id="auth-threshold" min="0.01" max="0.1" step="0.01" value="0.03">
+                    <span class="threshold-value">0.03</span>
+                </div>
+                <p class="setting-description">Lower values = more strict authentication</p>
+            </div>
+        </div>
+
+        <!-- Profile Registration Modal (Initially Hidden) -->
+        <div class="modal-overlay hidden" id="registration-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>Create New Profile</h3>
+                    <button class="btn-icon" id="close-registration">✕</button>
+                </div>
+                
+                <div class="modal-content">
+                    <div class="registration-step" id="step-1">
+                        <h4>Step 1: Profile Information</h4>
+                        <div class="form-group">
+                            <label for="profile-name">Profile Name:</label>
+                            <input type="text" id="profile-name" placeholder="Enter profile name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="training-password">Training Password:</label>
+                            <input type="password" id="training-password" placeholder="Password for biometric training" required>
+                            <p class="help-text">Use a password with at least 8 characters for better biometric accuracy</p>
+                        </div>
+                        <button class="btn btn-primary" id="start-keystroke-training">Start Keystroke Training</button>
+                    </div>
+                    
+                    <div class="registration-step hidden" id="step-2">
+                        <h4>Step 2: Keystroke Training</h4>
+                        <div class="training-info">
+                            <p>Type your password <strong id="training-count">5</strong> times to train your keystroke pattern.</p>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="keystroke-progress"></div>
+                            </div>
+                            <p class="samples-count">Samples captured: <span id="samples-captured">0</span>/5</p>
+                        </div>
+                        
+                        <div class="training-input">
+                            <input type="password" id="keystroke-input" placeholder="Type your password here" disabled>
+                            <button class="btn btn-secondary" id="reset-training">Reset Training</button>
+                        </div>
+                        
+                        <div class="training-status" id="training-status"></div>
+                        <button class="btn btn-primary hidden" id="start-voice-training">Continue to Voice Training</button>
+                        <button class="btn btn-secondary hidden" id="skip-voice-training">Skip Voice Training</button>
+                    </div>
+                    
+                    <div class="registration-step hidden" id="step-3">
+                        <h4>Step 3: Voice Training (Optional)</h4>
+                        <div class="voice-training">
+                            <p>Record the passphrase <strong>3 times</strong> for voice authentication fallback:</p>
+                            <div class="passphrase">
+                                <strong>"I'll Always Choose You"</strong>
+                            </div>
+                            
+                            <div class="voice-controls">
+                                <button class="btn btn-primary" id="voice-record-btn">🎤 Start Recording</button>
+                                <div class="voice-timer">0:00</div>
+                            </div>
+                            
+                            <div class="voice-samples">
+                                <p>Voice samples: <span id="voice-samples-count">0</span>/3</p>
+                                <div class="voice-progress">
+                                    <div class="voice-progress-fill" id="voice-progress"></div>
+                                </div>
+                            </div>
+                            
+                            <button class="btn btn-primary hidden" id="complete-registration">Complete Registration</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="recovery.js"></script>
+    <script src="health-check.js"></script>
+    <script src="libs/autoencoder.js"></script>
+    <script src="libs/ml-loader.js"></script>
+    <script src="ui/popup.js"></script>
+</body>
+</html>
