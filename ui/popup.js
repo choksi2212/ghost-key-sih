@@ -86,6 +86,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       alert('Initialization error: ' + error.message);
     }
   }
+  
+  // Listen for voice sample results from content script (page-context recording)
+  try {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      try {
+        if (message && message.type === 'VOICE_SAMPLE_RESULT' && message.payload) {
+          const { bytes, mime } = message.payload;
+          if (Array.isArray(bytes) && bytes.length > 0) {
+            const uint8 = new Uint8Array(bytes);
+            const blob = new Blob([uint8], { type: mime || 'audio/webm;codecs=opus' });
+            addVoiceSampleWithBlob(blob);
+            // Optional ack
+            if (sendResponse) sendResponse({ received: true });
+          }
+        }
+      } catch (e) {
+        console.warn('VOICE_SAMPLE_RESULT handling error:', e);
+        if (sendResponse) sendResponse({ received: false, error: e?.message });
+      }
+      return false;
+    });
+  } catch (e) {
+    console.warn('Failed to attach runtime message listener:', e);
+  }
 });
 
 /**
@@ -802,13 +826,15 @@ function toggleVoiceRecording() {
     return;
   }
   
+  // Keep UI text/flow the same but wire actual recording
   if (btn.textContent.includes('Start')) {
     btn.textContent = '⏹️ Stop Recording';
     startVoiceTimer();
+    startPageRecordingViaContent();
   } else {
     btn.textContent = '🎤 Start Recording';
     stopVoiceTimer();
-    addVoiceSample();
+    stopPageRecordingViaContent();
   }
 }
 
@@ -838,22 +864,98 @@ function stopVoiceTimer() {
   }
 }
 
-function addVoiceSample() {
+// === Real voice recording logic (keeps UI behavior the same) ===
+let voiceMediaStream = null;
+let voiceMediaRecorder = null;
+let voiceChunks = [];
+
+async function ensureMicrophonePermission() {
   try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const perm = await navigator.permissions.query({ name: 'microphone' });
+      if (perm.state === 'denied') {
+        alert('Microphone permission is denied for this site. Please allow it and try again.');
+        return false;
+      }
+    }
+    return true;
+  } catch (_) {
+    return true;
+  }
+}
+
+async function startPageRecordingViaContent() {
+  try {
+    const tab = await new Promise(resolve => chrome.tabs.query({ active: true, currentWindow: true }, tabs => resolve(tabs[0])));
+    await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'POPUP_START_VOICE_RECORD' }, (res) => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (res && res.success) return resolve(true);
+        reject(new Error(res && res.error || 'Failed to start'));
+      });
+    });
+  } catch (err) {
+    console.error('Start recording via content failed:', err);
+    alert('Unable to start recording on this page. Please allow microphone for the site and try again.');
+  }
+}
+
+async function stopPageRecordingViaContent() {
+  try {
+    const tab = await new Promise(resolve => chrome.tabs.query({ active: true, currentWindow: true }, tabs => resolve(tabs[0])));
+    await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'POPUP_STOP_VOICE_RECORD' }, (res) => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (res && res.success) return resolve(true);
+        reject(new Error(res && res.error || 'Failed to stop'));
+      });
+    });
+  } catch (err) {
+    console.error('Stop recording via content failed:', err);
+  }
+}
+
+async function addVoiceSampleWithBlob(audioBlob) {
+  try {
+    // Use VoiceAuthentication if available, else fallback to local extraction
+    const extractor = window.VoiceAuthentication ? new window.VoiceAuthentication() : null;
+    let features = null;
+    if (extractor && typeof extractor.extractVoiceFeatures === 'function') {
+      features = await extractor.extractVoiceFeatures(audioBlob);
+    } else {
+      features = await extractVoiceFeaturesFallback(audioBlob);
+    }
     popupState.registrationData.voiceSamples.push({
       timestamp: Date.now(),
-      // In real implementation, would include audio blob
+      blob: audioBlob,
+      features
     });
-    
     updateVoiceProgress();
-    
     const completeBtn = document.getElementById('complete-registration');
     if (popupState.registrationData.voiceSamples.length >= 3 && completeBtn) {
       completeBtn.classList.remove('hidden');
     }
   } catch (error) {
     console.error('Error adding voice sample:', error);
+    alert('Failed to process voice sample. Please try again.');
   }
+}
+
+async function extractVoiceFeaturesFallback(audioBlob) {
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  const data = audioBuffer.getChannelData(0);
+  const features = {
+    duration: audioBuffer.duration,
+    sampleRate: audioBuffer.sampleRate,
+    rmsEnergy: (function calculateRMS(audioData){ let sum=0; for(let i=0;i<audioData.length;i++) sum+=audioData[i]*audioData[i]; return Math.sqrt(sum/audioData.length); })(data),
+    zeroCrossingRate: (function calculateZCR(audioData){ let c=0; for(let i=1;i<audioData.length;i++){ if((audioData[i]>0)!==(audioData[i-1]>0)) c++; } return c/audioData.length; })(data),
+    spectralCentroid: (function calculateSpectralCentroid(audioData){ let sum=0, w=0; for(let i=0;i<audioData.length;i++){ const m=Math.abs(audioData[i]); sum+=m; w+=m*i; } return sum>0? w/sum : 0; })(data),
+    audioFingerprint: (function createSimpleFingerprint(audioData){ const parts=32; const chunk=Math.floor(audioData.length/parts)||1; const fp=[]; for(let i=0;i<parts;i++){ const start=i*chunk; const end=Math.min(start+chunk,audioData.length); let s=0; for(let j=start;j<end;j++) s+=Math.abs(audioData[j]); fp.push(s/Math.max(1,end-start)); } return fp; })(data)
+  };
+  audioContext.close();
+  return features;
 }
 
 function updateVoiceProgress() {
@@ -927,14 +1029,10 @@ async function completeRegistration() {
       
       showTrainingStatus('Creating profile...', 'info');
       
-      // Create voice profile if samples exist
+      // Create voice profile if samples exist (use averaged features)
       let voiceProfile = null;
       if (popupState.registrationData.voiceSamples && popupState.registrationData.voiceSamples.length > 0) {
-        voiceProfile = {
-          samples: popupState.registrationData.voiceSamples.length,
-          features: popupState.registrationData.voiceSamples.map(s => s.features || {}),
-          createdAt: new Date().toISOString()
-        };
+        voiceProfile = createAveragedVoiceProfile(popupState.registrationData.voiceSamples.map(s => s.features).filter(Boolean));
       }
       
       // Create new profile with trained model
@@ -1014,15 +1112,11 @@ async function completeRegistration() {
         
         showTrainingStatus('Creating profile...', 'info');
         
-        // Create voice profile if samples exist
-        let voiceProfile = null;
-        if (popupState.registrationData.voiceSamples && popupState.registrationData.voiceSamples.length > 0) {
-          voiceProfile = {
-            samples: popupState.registrationData.voiceSamples.length,
-            features: popupState.registrationData.voiceSamples.map(s => s.features || {}),
-            createdAt: new Date().toISOString()
-          };
-        }
+      // Create voice profile if samples exist (use averaged features)
+      let voiceProfile = null;
+      if (popupState.registrationData.voiceSamples && popupState.registrationData.voiceSamples.length > 0) {
+        voiceProfile = createAveragedVoiceProfile(popupState.registrationData.voiceSamples.map(s => s.features).filter(Boolean));
+      }
         
         // Create new profile with trained model
         const profileId = generateProfileId();
@@ -1205,4 +1299,32 @@ function extractKeystrokeFeatures(keystrokeBuffer) {
   }
   
   return features;
+}
+
+// Build averaged voice profile compatible with content.js verification
+function createAveragedVoiceProfile(featuresArray) {
+  if (!featuresArray || featuresArray.length === 0) return null;
+  const profile = {
+    rmsEnergy: 0,
+    zeroCrossingRate: 0,
+    spectralCentroid: 0,
+    audioFingerprint: new Array(32).fill(0),
+    sampleCount: featuresArray.length,
+    createdAt: new Date().toISOString()
+  };
+  for (const f of featuresArray) {
+    profile.rmsEnergy += f.rmsEnergy || 0;
+    profile.zeroCrossingRate += f.zeroCrossingRate || 0;
+    profile.spectralCentroid += f.spectralCentroid || 0;
+    const fp = f.audioFingerprint || [];
+    for (let i = 0; i < 32; i++) {
+      profile.audioFingerprint[i] += fp[i] || 0;
+    }
+  }
+  const n = featuresArray.length;
+  profile.rmsEnergy /= n;
+  profile.zeroCrossingRate /= n;
+  profile.spectralCentroid /= n;
+  for (let i = 0; i < 32; i++) profile.audioFingerprint[i] /= n;
+  return profile;
 }

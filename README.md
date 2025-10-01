@@ -1,31 +1,31 @@
-# 🔐 Ghost Key - Biometric Authentication Extension
+# 🔐 Ghost Key - Biometric Authentication Extension (Government Hackathon Edition)
 
-A revolutionary Chrome extension that provides **keystroke dynamics** and **voice biometric authentication** with **automatic login completion** for any website. Ghost Key automatically detects login and signup forms, captures your unique typing patterns and voice characteristics, and seamlessly logs you in without traditional passwords.
+A privacy‑first Chrome extension that provides **keystroke dynamics** and **voice verification** with **automatic login completion** for any website. Designed for national‑level government hackathons, it augments existing portals with strong on‑device biometrics — no server changes, no data leaving the device.
+
+## 🏛️ Government Hackathon Overview
+- **Problem**: Passwords dominate citizen portals; stronger auth often needs costly backend work and long rollouts.
+- **Solution**: A browser‑side biometric layer that adds strong, user‑friendly authentication to existing pages with zero backend changes.
+- **Impact**: Reduces account‑takeover risk, improves accessibility (voice fallback), and works fully offline for field scenarios.
+- **Readiness**: MV3, CSP‑compliant, auditable code; runs on Chrome/Edge today.
 
 ## 🌟 Key Features
 
-### 🔑 **Advanced Biometric Authentication**
-- **Keystroke Dynamics**: ML-powered analysis of your unique typing patterns using neural network autoencoders
-- **Voice Biometrics**: Voice pattern recognition with MFCC feature extraction and spectral analysis
-- **Smart Password Capture**: Securely captures actual passwords during biometric training for seamless auto-login
-- **Automatic Form Submission**: Intelligently finds and triggers sign-in buttons after successful authentication
-- **Fallback Authentication**: Automatic voice verification when keystroke authentication fails
-- **Real-time Analysis**: Live biometric pattern recognition as you type
+### 🔑 Authentication
+- **Keystroke Dynamics (Primary)**: On‑device autoencoder learns typing rhythm/features
+- **Voice Verification (Fallback)**: On‑device audio features (RMS/ZCR/spectral/fingerprint) with weighted similarity
+- **Zero Server Changes**: Works with existing forms; auto‑submits after success
+- **Strictly Local**: No network calls, analytics, or third‑party services
 
-### 🚀 **Seamless User Experience**
-- **One-Click Login**: Type your password once for training, then enjoy automatic login forever
-- **Universal Website Support**: Works on any website with login forms (Gmail, Facebook, banking, etc.)
-- **Password Field Auto-Detection**: Automatically activates when you focus on password fields
-- **Smart Form Submission**: Multiple strategies to find and trigger login buttons
-- **Visual Feedback**: Real-time status indicators and success/failure messages
-- **2-Second Ghost Key Indicator**: Brief, non-intrusive activation indicator
+### 🧭 Government-Ready Characteristics
+- **Privacy by Design**: Biometric vectors and trained models stored only in `chrome.storage.local`
+- **Offline Operation**: Fully functional without internet
+- **Accessibility**: Voice fallback supports users with motor impairments; configurable thresholds
+- **Low Cost & Rapid Adoption**: Deploys to citizen browsers; no backend integration
 
-### 🤖 **Advanced Machine Learning**
-- **Deep Learning Autoencoders**: 5-layer neural network for keystroke pattern learning
-- **32+ Biometric Features**: Comprehensive keystroke timing and pressure analysis
-- **Voice Processing**: Advanced audio feature extraction with fingerprinting
-- **Adaptive Thresholds**: Configurable security levels (0.01 - 0.1 sensitivity range)
-- **Real-time Authentication**: < 200ms authentication latency
+### 🤖 Machine Learning (On‑Device)
+- **Keystroke Autoencoder**: 34‑dimensional feature vector; normalization; augmentation; learned threshold
+- **Voice Features**: RMS energy, Zero‑Crossing Rate, Spectral Centroid, 32‑bin fingerprint with weighted similarity
+- **Latency**: 50–200ms typical; no network dependency
 
 ### 🛡️ **Enterprise-Grade Security**
 - **Local Storage Only**: All biometric data stored locally - never uploaded to servers
@@ -60,6 +60,12 @@ A revolutionary Chrome extension that provides **keystroke dynamics** and **voic
 
 ### Method 2: Chrome Web Store (Coming Soon)
 The extension will be available on the Chrome Web Store once published.
+
+## 🎬 3‑Minute Judge Demo
+1. Load and pin the extension
+2. Create a profile → keystroke training (5×) → voice samples (3×)
+3. Open a login page and type the trained password
+4. Observe auto‑fill + auto‑submit; on failure, voice fallback
 
 ## 🚀 Quick Start Guide
 
@@ -224,7 +230,7 @@ graph TD
 - **Active Profile Badge**: Visual indicator showing current active profile initial
 - **Profile Statistics**: View authentication success rates and usage metrics
 
-## 🔒 Security Architecture
+## 🔒 Security & Compliance Architecture
 
 ### Data Protection & Privacy
 
@@ -256,11 +262,10 @@ graph TD
 
 ### Compliance & Standards
 
-- **GDPR Compliant**: No personal data processing or storage on servers
-- **CCPA Compliant**: No sale or sharing of personal information
-- **NIST Guidelines**: Follows NIST 800-63B biometric authentication standards
-- **Chrome Security**: Complies with Chrome extension security policies
-- **CSP Compliant**: Content Security Policy adherent for maximum security
+- **GDPR/CCPA‑Aligned**: Data minimization and storage limitation (local only)
+- **NIST 800‑63B‑Aligned**: Behavioral biometrics as a risk signal; configurable thresholds
+- **OWASP‑Aligned**: Local‑only storage, runtime checks, CSP adherence
+- **Chrome Policy**: MV3, least privilege, no remote code
 
 
 ### Custom Thresholds
@@ -371,7 +376,7 @@ Audio Input → Preprocessing → Feature Extraction → Similarity Analysis
 | ✅ **Edge** | 88+ | Full Support | Chromium-based, fully compatible |
 | ⚠️ **Brave** | 1.20+ | Limited Testing | May require additional permissions |
 
-### Security Certifications
+### Security & Standards Mapping
 
 - 🔒 **FIDO Alliance**: Compliant with FIDO2 biometric standards
 - 🎯 **NIST**: Follows NIST 800-63B authentication guidelines
@@ -506,10 +511,10 @@ This software contains cryptographic features and may be subject to export contr
 
 ### 🔗 Third-Party Acknowledgments
 
-**Open Source Libraries**:
-- **TensorFlow.js** - Machine learning framework (Apache 2.0 License)
+**Open Source & Standards**:
 - **Web Audio API** - Browser audio processing (W3C Standard)
 - **Chrome Extensions API** - Browser integration (Google/Chromium)
+- *Note: Current build runs custom on‑device ML without external ML frameworks.*
 
 **Inspiration & Research**:
 - Academic research in keystroke dynamics and voice biometrics
@@ -540,4 +545,4 @@ You're not just using an extension - you're part of a movement toward a **passwo
 
 ---
 
-*Ghost Key - Where biometrics meet convenience, and security becomes invisible.*
+*Ghost Key - Secure, private, and ready for the public sector.*

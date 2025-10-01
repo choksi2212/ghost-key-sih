@@ -513,6 +513,8 @@ function setupVoiceRecording(modal) {
   const statusDiv = modal.querySelector('#voice-status');
   const failureCountSpan = modal.querySelector('#failure-count');
   let audioBlob = null;
+  let mediaStream = null;
+  let mediaRecorder = null;
   
   // Helper function to update status
   const updateStatus = (message, color = '#fbbf24') => {
@@ -541,33 +543,50 @@ function setupVoiceRecording(modal) {
     hideAuthenticationIndicator();
   });
   
+  const ensureMicrophonePermission = async () => {
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const perm = await navigator.permissions.query({ name: 'microphone' });
+        if (perm.state === 'denied') {
+          updateStatus('Microphone permission denied. Please allow mic for this site.', '#ef4444');
+          showMessage('Please allow microphone access in the site permissions and try again.', 'error');
+          return false;
+        }
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
+  };
+
   recordBtn.addEventListener('click', async () => {
     try {
       if (recordBtn.textContent.includes('Record')) {
-        // Start recording
+        const allowed = await ensureMicrophonePermission();
+        if (!allowed) return;
         updateStatus('Requesting microphone access...', '#3b82f6');
-        
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const recorder = new MediaRecorder(stream);
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
         const chunks = [];
-        
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = () => {
-          audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          audioBlob = new Blob(chunks, { type: 'audio/webm;codecs=opus' });
           verifyBtn.disabled = false;
           updateStatus('Recording complete. Click Verify to authenticate.', '#10b981');
+          if (mediaStream) {
+            mediaStream.getTracks().forEach(track => track.stop());
+            mediaStream = null;
+          }
         };
-        
-        recorder.start();
+        mediaRecorder.start();
         recordBtn.textContent = '⏹️ Stop';
         updateStatus('🔴 Recording... Speak the passphrase now', '#ef4444');
-        
-        recordBtn.onclick = () => {
-          recorder.stop();
-          stream.getTracks().forEach(track => track.stop());
-          recordBtn.textContent = '🎤 Record';
-          updateStatus('Processing recording...', '#f59e0b');
-        };
+      } else {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+        recordBtn.textContent = '🎤 Record';
+        updateStatus('Processing recording...', '#f59e0b');
       }
     } catch (error) {
       console.error('Microphone access error:', error);
@@ -582,15 +601,73 @@ function setupVoiceRecording(modal) {
         verifyBtn.disabled = true;
         verifyBtn.textContent = '🔄 Verifying...';
         updateStatus('Analyzing voice patterns...', '#3b82f6');
-        
-        // Simulate voice verification with realistic success/failure
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Simulate 70% success rate for demonstration
-        const isVoiceAuthSuccessful = Math.random() > 0.3;
-        
-        console.log('Voice authentication result:', isVoiceAuthSuccessful ? 'SUCCESS' : 'FAILED');
-        
+
+        const currentFeatures = await (async function extractVoiceFeatures(blob) {
+          const arrayBuffer = await blob.arrayBuffer();
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          const data = audioBuffer.getChannelData(0);
+          const features = {
+            duration: audioBuffer.duration,
+            sampleRate: audioBuffer.sampleRate,
+            rmsEnergy: (function calculateRMS(audioData){ let sum=0; for(let i=0;i<audioData.length;i++) sum+=audioData[i]*audioData[i]; return Math.sqrt(sum/audioData.length); })(data),
+            zeroCrossingRate: (function calculateZCR(audioData){ let c=0; for(let i=1;i<audioData.length;i++){ if((audioData[i]>0)!==(audioData[i-1]>0)) c++; } return c/audioData.length; })(data),
+            spectralCentroid: (function calculateSpectralCentroid(audioData){ let sum=0, w=0; for(let i=0;i<audioData.length;i++){ const m=Math.abs(audioData[i]); sum+=m; w+=m*i; } return sum>0? w/sum : 0; })(data),
+            audioFingerprint: (function createSimpleFingerprint(audioData){ const parts=32; const chunk=Math.floor(audioData.length/parts)||1; const fp=[]; for(let i=0;i<parts;i++){ const start=i*chunk; const end=Math.min(start+chunk,audioData.length); let s=0; for(let j=start;j<end;j++) s+=Math.abs(audioData[j]); fp.push(s/Math.max(1,end-start)); } return fp; })(data)
+          };
+          audioContext.close();
+          return features;
+        })(audioBlob);
+
+        let activeProfileId = null;
+        let storedProfile = null;
+        await new Promise((resolve) => {
+          safeMessageSend({ type: 'GET_EXTENSION_STATE' }, (res) => {
+            if (res && res.currentProfile) activeProfileId = res.currentProfile;
+            resolve(true);
+          });
+        });
+        if (activeProfileId) {
+          await new Promise((resolve) => {
+            safeMessageSend({ type: 'GET_PROFILES' }, (res) => {
+              try {
+                const profiles = res && res.profiles ? res.profiles : {};
+                const p = profiles[activeProfileId];
+                if (p && p.voiceProfile) storedProfile = p.voiceProfile;
+              } catch (_) {}
+              resolve(true);
+            });
+          });
+        }
+
+        if (!storedProfile) {
+          updateStatus('No stored voice profile. Please add voice samples in settings.', '#f59e0b');
+          verifyBtn.disabled = false;
+          verifyBtn.textContent = 'Verify';
+          return;
+        }
+
+        const comparison = (function compareVoiceFeatures(stored, current){
+          const rmsDiff = Math.abs(stored.rmsEnergy - current.rmsEnergy);
+          const rmsSim = Math.max(0, 1 - rmsDiff / Math.max(stored.rmsEnergy || 1e-6, current.rmsEnergy || 1e-6));
+          const zcrDiff = Math.abs(stored.zeroCrossingRate - current.zeroCrossingRate);
+          const zcrSim = Math.max(0, 1 - zcrDiff / Math.max(stored.zeroCrossingRate || 1e-6, current.zeroCrossingRate || 1e-6));
+          const centDiff = Math.abs(stored.spectralCentroid - current.spectralCentroid);
+          const centSim = Math.max(0, 1 - centDiff / Math.max(stored.spectralCentroid || 1e-6, current.spectralCentroid || 1e-6));
+          const fpSim = (function cosine(a,b){ if(!Array.isArray(a)||!Array.isArray(b)||a.length!==b.length||a.length===0) return 0; let dot=0,m1=0,m2=0; for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; m1+=a[i]*a[i]; m2+=b[i]*b[i]; } m1=Math.sqrt(m1); m2=Math.sqrt(m2); if(m1===0||m2===0) return 0; return dot/(m1*m2); })(stored.audioFingerprint||[], current.audioFingerprint||[]);
+          const sims=[rmsSim,zcrSim,centSim,fpSim];
+          const weights=[0.2,0.2,0.2,0.4];
+          let overall=0; for(let i=0;i<sims.length;i++) overall+=sims[i]*weights[i];
+          const mean = sims.reduce((a,b)=>a+b,0)/sims.length;
+          const variance = sims.reduce((s,v)=>s+Math.pow(v-mean,2),0)/sims.length;
+          const confidence = (mean*0.7)+(Math.max(0,1-variance)*0.3);
+          return { overallSimilarity: overall, confidence, details: { rms:rmsSim, zcr:zcrSim, centroid:centSim, fingerprint:fpSim } };
+        })(storedProfile, currentFeatures);
+
+        const threshold = 0.65;
+        const isVoiceAuthSuccessful = comparison.overallSimilarity >= threshold;
+        console.log('Voice auth similarity:', comparison.overallSimilarity.toFixed(3), 'conf:', comparison.confidence.toFixed(3));
+
         if (isVoiceAuthSuccessful) {
           // SUCCESS CASE
           console.log('🎉 Voice authentication successful - auto-completing login process');
@@ -697,6 +774,57 @@ function setupVoiceRecording(modal) {
       // No audio recorded
       updateStatus('⚠️ Please record your voice first', '#f59e0b');
       showMessage('⚠️ Please record your voice first.', 'warning');
+    }
+  });
+}
+
+// Page-context recording for popup training
+let __gk_pageMediaStream = null;
+let __gk_pageMediaRecorder = null;
+let __gk_pageChunks = [];
+
+async function startPageVoiceRecording() {
+  const allowed = await (async () => {
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const perm = await navigator.permissions.query({ name: 'microphone' });
+        if (perm.state === 'denied') {
+          showMessage('Please allow microphone for this site and try again.', 'error');
+          return false;
+        }
+      }
+      return true;
+    } catch (_) { return true; }
+  })();
+  if (!allowed) throw new Error('Microphone permission denied');
+
+  __gk_pageChunks = [];
+  __gk_pageMediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  __gk_pageMediaRecorder = new MediaRecorder(__gk_pageMediaStream, { mimeType: 'audio/webm;codecs=opus' });
+  __gk_pageMediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) __gk_pageChunks.push(e.data); };
+  __gk_pageMediaRecorder.start();
+}
+
+async function stopPageVoiceRecording() {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!__gk_pageMediaRecorder || __gk_pageMediaRecorder.state === 'inactive') {
+        reject(new Error('No active recording'));
+        return;
+      }
+      __gk_pageMediaRecorder.onstop = () => {
+        try {
+          const blob = new Blob(__gk_pageChunks, { type: 'audio/webm;codecs=opus' });
+          if (__gk_pageMediaStream) {
+            __gk_pageMediaStream.getTracks().forEach(t => t.stop());
+            __gk_pageMediaStream = null;
+          }
+          resolve(blob);
+        } catch (e) { reject(e); }
+      };
+      __gk_pageMediaRecorder.stop();
+    } catch (e) {
+      reject(e);
     }
   });
 }
@@ -1193,6 +1321,30 @@ function setupMessageListener() {
           case 'SHOW_ERROR_MESSAGE':
             showMessage(message.message, 'error');
             sendResponse({ success: true });
+            break;
+          
+          // Popup-driven voice training fallback (record in page context)
+          case 'POPUP_START_VOICE_RECORD':
+            startPageVoiceRecording().then(() => {
+              sendResponse({ success: true });
+            }).catch((err) => {
+              sendResponse({ success: false, error: err?.message || 'Failed to start recording' });
+            });
+            break;
+          case 'POPUP_STOP_VOICE_RECORD':
+            stopPageVoiceRecording().then(async (audioBlob) => {
+              try {
+                const buf = await audioBlob.arrayBuffer();
+                const bytes = Array.from(new Uint8Array(buf));
+                // Send sample result back to extension (popup will listen)
+                chrome.runtime.sendMessage({ type: 'VOICE_SAMPLE_RESULT', payload: { bytes, mime: audioBlob.type } });
+                sendResponse({ success: true });
+              } catch (e) {
+                sendResponse({ success: false, error: e?.message || 'Failed to process recording' });
+              }
+            }).catch((err) => {
+              sendResponse({ success: false, error: err?.message || 'Failed to stop recording' });
+            });
             break;
             
           default:
