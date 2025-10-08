@@ -168,6 +168,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         handleCloseWebsite(sender.tab, clearTimeoutAndRespond);
         break;
         
+      case 'GET_SETTINGS':
+        handleGetSettings(clearTimeoutAndRespond);
+        break;
+        
       default:
         console.warn('Unknown message type:', message.type);
         clearTimeoutAndRespond({ error: 'Unknown message type' });
@@ -297,7 +301,7 @@ async function handleKeystrokeData(keystrokeData, tab, sendResponse) {
       return;
     }
     
-    const { profiles } = await chrome.storage.local.get(['profiles']);
+    const { profiles, settings } = await chrome.storage.local.get(['profiles', 'settings']);
     const profile = profiles[extensionState.currentProfile];
     
     if (!profile || !profile.keystrokeModel) {
@@ -305,12 +309,14 @@ async function handleKeystrokeData(keystrokeData, tab, sendResponse) {
       return;
     }
     
-    // Perform authentication using stored model data
+    // Perform authentication using stored model data with current UI threshold
     try {
       console.log('Performing keystroke authentication...');
       
-      // Use the authentication logic directly without eval
-      const authResult = performKeystrokeAuthentication(keystrokeData.features, profile.keystrokeModel);
+      // Use the authentication logic with current UI threshold
+      const currentThreshold = settings?.authThreshold || 0.03;
+      console.log('Using threshold for keystroke auth:', currentThreshold, 'from settings:', settings);
+      const authResult = performKeystrokeAuthentication(keystrokeData.features, profile.keystrokeModel, currentThreshold);
       
       console.log('Authentication result:', authResult);
       
@@ -527,6 +533,19 @@ async function handleCloseWebsite(tab, sendResponse) {
 }
 
 /**
+ * Get current settings
+ */
+async function handleGetSettings(sendResponse) {
+  try {
+    const { settings } = await chrome.storage.local.get(['settings']);
+    sendResponse({ success: true, settings: settings || {} });
+  } catch (error) {
+    console.error('Error getting settings:', error);
+    sendResponse({ error: error.message });
+  }
+}
+
+/**
  * Generate unique profile ID
  */
 function generateProfileId() {
@@ -577,7 +596,7 @@ console.log('Ghost Key background script loaded');
  * Keystroke authentication function - CSP-compliant version
  * Ported from autoencoder.js to avoid eval() issues
  */
-function performKeystrokeAuthentication(inputFeatures, trainedModelData) {
+function performKeystrokeAuthentication(inputFeatures, trainedModelData, currentThreshold) {
   try {
     if (!trainedModelData || trainedModelData.modelType !== "autoencoder" || !trainedModelData.autoencoder) {
       throw new Error("Invalid model data - expected autoencoder model for authentication");
@@ -609,8 +628,8 @@ function performKeystrokeAuthentication(inputFeatures, trainedModelData) {
     }
     reconstructionError /= normalizedInputFeatures.length;
 
-    // Check against the learned authentication threshold
-    const authenticationThreshold = trainedModelData.threshold;
+    // Use the current UI threshold instead of the stored model threshold
+    const authenticationThreshold = currentThreshold || trainedModelData.threshold;
     const authenticationSuccessful = reconstructionError <= authenticationThreshold;
 
     // Calculate confidence score

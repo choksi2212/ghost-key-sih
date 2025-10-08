@@ -543,7 +543,9 @@ function hideSettings() {
 function updateThresholdDisplay() {
   const slider = document.getElementById('auth-threshold');
   const display = document.querySelector('.threshold-value');
-  display.textContent = parseFloat(slider.value).toFixed(3);
+  const value = parseFloat(slider.value).toFixed(3);
+  display.textContent = value;
+  console.log('Threshold display updated to:', value);
 }
 
 async function saveSettings() {
@@ -558,7 +560,8 @@ async function saveSettings() {
   
   try {
     await chrome.storage.local.set({ settings: popupState.settings });
-    console.log('Settings saved');
+    console.log('Settings saved:', popupState.settings);
+    console.log('Current threshold value:', popupState.settings.authThreshold);
   } catch (error) {
     console.error('Error saving settings:', error);
   }
@@ -1022,8 +1025,10 @@ async function completeRegistration() {
       
       console.log('Training model with', featureVectors.length, 'feature vectors');
       
-      // Train the autoencoder model
-      const trainedModel = await window.GhostKeyML.trainKeystrokeBiometricModel(featureVectors);
+      // Train the autoencoder model with current UI threshold
+      const currentThreshold = popupState.settings.authThreshold || 0.03;
+      console.log('Training with threshold:', currentThreshold, 'from popupState.settings:', popupState.settings);
+      const trainedModel = await window.GhostKeyML.trainKeystrokeBiometricModel(featureVectors, currentThreshold);
       
       console.log('Model training completed:', trainedModel);
       
@@ -1105,8 +1110,10 @@ async function completeRegistration() {
         
         console.log('Training model with', featureVectors.length, 'feature vectors');
         
-        // Train the autoencoder model
-        const trainedModel = await window.GhostKeyML.trainKeystrokeBiometricModel(featureVectors);
+        // Train the autoencoder model with current UI threshold
+        const currentThreshold = popupState.settings.authThreshold || 0.03;
+        console.log('Training with threshold (fallback):', currentThreshold, 'from popupState.settings:', popupState.settings);
+        const trainedModel = await window.GhostKeyML.trainKeystrokeBiometricModel(featureVectors, currentThreshold);
         
         console.log('Model training completed:', trainedModel);
         

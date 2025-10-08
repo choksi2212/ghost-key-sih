@@ -268,7 +268,7 @@ function addRealisticNoise(originalSample, noiseIntensity = BIOMETRIC_AUTH_CONFI
  * Handles data augmentation, normalization, training, and threshold calculation
  * Ported from the main Ghost Key project's train-model route
  */
-async function trainKeystrokeBiometricModel(trainingSamples) {
+async function trainKeystrokeBiometricModel(trainingSamples, customThreshold = null) {
   if (trainingSamples.length < BIOMETRIC_AUTH_CONFIG.MINIMUM_TRAINING_SAMPLES) {
     throw new Error(`Need at least ${BIOMETRIC_AUTH_CONFIG.MINIMUM_TRAINING_SAMPLES} samples for reliable training`);
   }
@@ -316,13 +316,20 @@ async function trainKeystrokeBiometricModel(trainingSamples) {
     reconstructionErrors.push(meanSquaredError);
   }
 
-  // Calculate authentication threshold using 95th percentile of training errors
-  const sortedErrors = [...reconstructionErrors].sort((a, b) => a - b);
-  const percentile95Index = Math.floor(sortedErrors.length * 0.95);
-  const calculatedThreshold = Math.max(
-    sortedErrors[percentile95Index] || BIOMETRIC_AUTH_CONFIG.DEFAULT_AUTH_THRESHOLD,
-    BIOMETRIC_AUTH_CONFIG.DEFAULT_AUTH_THRESHOLD
-  );
+  // Use custom threshold if provided, otherwise calculate using 95th percentile of training errors
+  let calculatedThreshold;
+  if (customThreshold !== null && customThreshold !== undefined) {
+    calculatedThreshold = customThreshold;
+    console.log(`Using custom threshold: ${calculatedThreshold.toFixed(6)} (provided: ${customThreshold})`);
+  } else {
+    const sortedErrors = [...reconstructionErrors].sort((a, b) => a - b);
+    const percentile95Index = Math.floor(sortedErrors.length * 0.95);
+    calculatedThreshold = Math.max(
+      sortedErrors[percentile95Index] || BIOMETRIC_AUTH_CONFIG.DEFAULT_AUTH_THRESHOLD,
+      BIOMETRIC_AUTH_CONFIG.DEFAULT_AUTH_THRESHOLD
+    );
+    console.log(`Calculated threshold from training data: ${calculatedThreshold.toFixed(6)}`);
+  }
 
   const averageError = reconstructionErrors.reduce((a, b) => a + b, 0) / reconstructionErrors.length;
   const maximumError = Math.max(...reconstructionErrors);

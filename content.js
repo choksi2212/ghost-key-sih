@@ -664,8 +664,30 @@ function setupVoiceRecording(modal) {
           return { overallSimilarity: overall, confidence, details: { rms:rmsSim, zcr:zcrSim, centroid:centSim, fingerprint:fpSim } };
         })(storedProfile, currentFeatures);
 
-        const threshold = 0.65;
-        const isVoiceAuthSuccessful = comparison.overallSimilarity >= threshold;
+        // Get current UI threshold from settings and convert for voice auth
+        // Voice similarity is 0-1, so we need to convert the keystroke threshold (0.01-0.1) to voice range
+        let currentThreshold = 0.65; // fallback
+        try {
+          const settingsResult = await new Promise((resolve) => {
+            safeMessageSend({ type: 'GET_SETTINGS' }, (res) => {
+              resolve(res);
+            });
+          });
+          console.log('Voice auth - settings result:', settingsResult);
+          if (settingsResult && settingsResult.settings && settingsResult.settings.authThreshold !== undefined) {
+            // Convert keystroke threshold (0.01-0.1) to voice threshold (0.1-0.9)
+            // Lower keystroke threshold = higher voice threshold (more strict)
+            const keystrokeThreshold = settingsResult.settings.authThreshold;
+            currentThreshold = Math.max(0.1, Math.min(0.9, 1 - (keystrokeThreshold * 10)));
+            console.log('Voice auth - converted threshold from', keystrokeThreshold, 'to', currentThreshold);
+          } else {
+            console.log('Voice auth - using fallback threshold:', currentThreshold);
+          }
+        } catch (e) {
+          console.warn('Could not get current threshold, using fallback:', e);
+        }
+        
+        const isVoiceAuthSuccessful = comparison.overallSimilarity >= currentThreshold;
         console.log('Voice auth similarity:', comparison.overallSimilarity.toFixed(3), 'conf:', comparison.confidence.toFixed(3));
 
         if (isVoiceAuthSuccessful) {
